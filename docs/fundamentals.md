@@ -1,8 +1,12 @@
 # v2 Fundamentals
 
+In this document:
+- ☑️ means implemented in the PoC
+- 🔴 means downstream (OCP) only
+
 ## Changes since the demo
 
-### From cluster-scoped to namespaced (implemented)
+### ☑️ From cluster-scoped to namespaced
 It is desirable for users (e.g. GPU Operator) to set an `ownerReference` on the `Modules` that they own.
 
 Only namespaced resources offer this feature, so `Module` is now namespaced.
@@ -13,56 +17,13 @@ This brings additional benefits:
 
 We still make it clear that the `Role` that allows service accounts to create `Modules` should be granted with caution.
 
-### Two DaemonSets per `Module`
-DriverContainer and device plugin should be two distinct DaemonSets.
-This allows updates to the device plugin spec without driver downtime.
-
-```yaml
-apiVersion: ooto.sigs.k8s.io/v1alpha1
-kind: Module
-metadata:
-  name: module-sample
-spec:
-  devicePlugin: # is a Container spec
-    container:
-      # This container will be privileged and will mount
-      # /var/lib/kubelet/device-plugins automatically.
-      image: some-image
-      volumeMounts: [] # additional volume mounts (optional)
-
-    serviceAccountName: some-sa # optional
-    volumes: [] # a list of additional volumes
-  driverContainer: # is a Container spec
-    # This container will not be privileged by default.
-    # It will mount /lib/modules and /usr/lib/modules automatically.
-    container:
-      securityContext:
-        capabilities:
-          add: [SYS_MODULE] # this is enough in most cases
-        seLinuxOptions:
-          type: spc_t # probably over-privileged, we should look for something tighter
-      volumeMounts: [] # additional volume mounts (optional)
-
-    kernelMappings: []
-      - literal: 5.16.11-200.fc35.x86_64
-        containerImage: quay.io/vendor/module-sample:fedora-5.16.11-200.fc35.x86_64
-
-    serviceAccountName: some-sa # optional
-    volumes: [] # a list of additional volumes
-  selector:  # top-level selector
-    feature.node.kubernetes.io/cpu-cpuid.VMX: true
-```
-
-`.spec.driverContainer` and `.spec.devicePlugin` will look like `PodSpec` objects to be extensible in the future with
-(init-)containers and other properties if needed.
-
-**Proposal**: to split the existing DaemonSet into two.
-
-### Mounting volumes by default (implemented)
+### ☑️ Mounting volumes by default
 The DriverContainer pod / container mounts the host's `/lib/modules` and `/usr/lib/modules` (in most cases, a symlink)
-directories in read-only mode.
+directories in read-only mode.  
 This allows OOT kernel modules in the DriverContainer to depend on RHEL in-tree modules without having to copy them into
-the image.
+the image.  
+A direct consequence is that users must place their module files somewhere else in the container filesystem, e.g. under
+`/opt/lib/modules`.
 
 The device plugin pod / container mounts the host's `/var/lib/kubelet/device-plugins` in read-write mode.
 This is a [requirement](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/#device-plugin-implementation)
@@ -70,51 +31,7 @@ for device plugins.
 
 For both pods, additional volumes and volume mounts may be specified as desired.
 
-### PodSecurityPolicy and service accounts
-[Pod Security Policies](https://kubernetes.io/docs/concepts/security/pod-security-policy/) provide an access-control
-mechanism that restricts what kind of workload specific accounts can run, among other things.
-Although it is an optional feature in Kubernetes, most distribution enable PSPs by default (with the notable exception
-of Minikube).
-
-OCP uses [SecurityContextConstraints](https://docs.openshift.com/container-platform/4.10/authentication/managing-security-context-constraints.html)
-instead of PSPs, although both mechanisms are very similar.
-
-The operator creates workload with high privileges:
-- `CAP_SYS_MODULE` and some powerful SELinux type for the DriverContainer;
-- `privileged: true` for the device-plugin.
-
-Thus, when creating the DaemonSets, we need to set a `.spec.template.spec.serviceAccountName` value that is able to
-use a PSP or SCC that will allow the creation of pods.
-There are two scenarios:
-- either the user supplies both a PSP / SCC and a ServiceAccount that can use it (implemented), or;
-- the operator must dynamically two service accounts (one per DaemonSet) and bind them to the appropriate PSPs / SCCs.
-  If the default policies are too restrictive or permissive for our most common use case, we might deploy our own in
-  the bundle.
-
-**Proposal**: to create one Service Account per DaemonSet and bind it to the appropriate PSP / SCC.
-
-### Conditions vs concrete data
-The usage of conditions and the kind of data that they should expose is not consistent across Kubernetes projects.
-It seems pretty clear, however, that they should not represent a transient state (`Progressing`, for example, should be
-avoided).
-
-`DaemonSets` in Minikube do not expose any condition.
-Instead, they expose integers describing extensively the number of daemon pods deployed or scheduled.
-
-Exposing concrete data helps our users better understand the current state of the `Module` and require less difficult
-decisions on our side (should we be `Ready` if all pods are running except one?).
-
-**Proposal**: to only expose integers read from the `Modules`' `DaemonSets` (for now).
-
-### ValidatingWebhook for `Module`
-We can specify a number of field constraints using OpenAPI in the CRD - `isValidRegex` is not one of them.
-
-The operator should offer a webhook that is triggered on `Module` creation and updates to verify that the regexes
-(potentially) present in the kernel mappings are valid.
-
-**Proposal**: to implement a ValidatingWebhook to verify that regexes are valid.
-
-## Items from design meetings
+## Feedback from design meetings
 
 ### Secure Boot and module signing
 Assumptions:
@@ -166,7 +83,7 @@ Pre-flight checks consist in adding a dedicated CR specifying a future kernel `K
 The traditional reconciliation loop should run just like if a node running `K` was in the cluster.
 
 **Proposal**:
-- if in-cluster builds are configured for `K` and the resulting image does not exist, the operator should build the 
+- if in-cluster builds are configured for `K` and the resulting image does not exist, the operator should build the
   image;
 - if module signing is configured and the resulting image does not exist, the operator should produce an image and push
   it to the desired location;
@@ -177,16 +94,21 @@ The traditional reconciliation loop should run just like if a node running `K` w
 - the operator should process the `Preflight` like it would process a `Node`, stopping short of creating any
   `DaemonSet`.
 
-### [Downstream] Hub & Spoke setups
+### Hub & Spoke setups
 Assumptions:
 - the operator only handles day 1 situations;
-- a mechanism to manage resources on the Spokes from the Hub is available (ACM);
+- a mechanism to manage resources on the Spokes from the Hub is available (OCM / 🔴 ACM);
 - Spokes may not build images.
 
 **Proposal**:
 - run the operator in all spokes;
 - deploy the `Module` from the Hub;
 - leverage the Pre-flight feature to pre-build and pre-sign images on the Hub.
+
+This proposal is entirely decoupled from the OCM implementation and thus not downstream-specific.  
+It requires that the operator has a very light footprint.
+If the reconciliation loop grows in complexity, we might want to introduce a switch that reduces the number of features
+running in Spokes.
 
 ### Logging and troubleshooting
 Assumptions:
@@ -200,11 +122,149 @@ Per [SIG Instrumentation](https://github.com/kubernetes/community/blob/master/co
 **Proposal**:
 - We use the [`logr` API](https://github.com/go-logr/logr) and the [klog](https://github.com/kubernetes/klog)
   implementation;
-- Errors should always be returned and optionally wrapped for more context;
+- Errors are always returned and optionally wrapped for more context;
+- Errors are returned from `Reconcile` and the manager is in charge of logging them and requeueing the request;
 - Reusable code (in `pkg`) tries very hard not to log anything;
 - Internal code receives and forwards loggers via `context.Context`;
-- [Downstream] [must-gather](https://docs.openshift.com/container-platform/4.10/support/gathering-cluster-data.html) is
-  implemented.
+- 🔴 [must-gather](https://docs.openshift.com/container-platform/4.10/support/gathering-cluster-data.html) is
+  implemented;
+- We study the use of [`Events`](https://www.cncf.io/blog/2020/12/10/the-top-kubernetes-apis-for-cloud-native-observability-part-1-the-kubernetes-metrics-service-container-apis-3/)
+  to expose troubleshooting data to the user.
+
+## Other fundamentals
+
+### Two DaemonSets per `Module`
+DriverContainer and device plugin should be two distinct DaemonSets.
+This allows updates to the device plugin spec without driver downtime.
+
+```yaml
+apiVersion: ooto.sigs.k8s.io/v1alpha1
+kind: Module
+metadata:
+  name: module-sample
+spec:
+  devicePlugin: # is a Container spec
+    container:
+      # This container will be privileged and will mount
+      # /var/lib/kubelet/device-plugins automatically.
+      image: some-image
+      volumeMounts: [] # additional volume mounts (optional)
+
+    serviceAccountName: some-sa # optional
+    volumes: [] # a list of additional volumes
+  driverContainer: # is a Container spec
+    # This container will not be privileged by default.
+    # It will mount /lib/modules and /usr/lib/modules automatically.
+    container:
+      securityContext:
+        capabilities:
+          add: [SYS_MODULE] # this is enough in most cases
+        seLinuxOptions:
+          type: spc_t # probably over-privileged, we should look for something tighter
+      volumeMounts: [] # additional volume mounts (optional)
+
+    kernelMappings: []
+      - literal: 5.16.11-200.fc35.x86_64
+        containerImage: quay.io/vendor/module-sample:fedora-5.16.11-200.fc35.x86_64
+
+    serviceAccountName: some-sa # optional
+    volumes: [] # a list of additional volumes
+  selector:  # top-level selector
+    feature.node.kubernetes.io/cpu-cpuid.VMX: true
+```
+
+`.spec.driverContainer` and `.spec.devicePlugin` will look like `PodSpec` objects to be extensible in the future with
+(init-)containers and other properties if needed.
+
+**Proposal**: to split the existing DaemonSet into two.
+
+### PodSecurityPolicy and service accounts
+[Pod Security Policies](https://kubernetes.io/docs/concepts/security/pod-security-policy/) provide an access-control
+mechanism that restricts what kind of workload specific accounts can run, among other things.
+Although it is an optional feature in Kubernetes, most distribution enable PSPs by default (with the notable exception
+of Minikube).
+
+🔴 OCP uses [SecurityContextConstraints](https://docs.openshift.com/container-platform/4.10/authentication/managing-security-context-constraints.html)
+instead of PSPs, although both mechanisms are very similar.
+
+The operator creates workload with high privileges:
+- `CAP_SYS_MODULE` and some powerful SELinux type for the DriverContainer;
+- `privileged: true` for the device-plugin.
+
+Thus, when creating the DaemonSets, we need to set a `.spec.template.spec.serviceAccountName` value that is able to
+use a PSP or SCC that will allow the creation of pods.
+There are two scenarios:
+- either the user supplies both a PSP / SCC and a ServiceAccount that can use it (implemented), or;
+- the operator must dynamically two service accounts (one per DaemonSet) and bind them to the appropriate PSPs / SCCs.
+  If the default policies are too restrictive or permissive for our most common use case, we might deploy our own in
+  the bundle.
+
+**Proposal**: to create one Service Account per DaemonSet and bind it to the appropriate PSP / SCC.
+
+### Conditions vs concrete data
+The usage of conditions and the kind of data that they should expose is not consistent across Kubernetes projects.
+It seems pretty clear, however, that they should not represent a transient state (`Progressing`, for example, should be
+avoided).
+
+`DaemonSets` in Minikube do not expose any condition.
+Instead, they expose integers describing extensively the number of daemon pods deployed or scheduled.
+
+Exposing concrete data helps our users better understand the current state of the `Module` and require less difficult
+decisions on our side (should we be `Ready` if all pods are running except one?).
+
+**Proposal**: to only expose integers read from the `Modules`' `DaemonSets` (for now).
+
+### ValidatingWebhook for `Module`
+We can specify a number of field constraints using OpenAPI in the CRD - `isValidRegex` is not one of them.
+
+The operator should offer a webhook that is triggered on `Module` creation and updates to verify that the regexes
+(potentially) present in the kernel mappings are valid.
+
+**Proposal**: to implement a ValidatingWebhook to verify that regexes are valid.
+
+### Templating
+
+To avoid repetition in the CRD, it is desirable to perform variable substitution in select fields of the CRD.
+Variables could include:
+
+| Variable                 | Description                                       | Example                         |
+|--------------------------|---------------------------------------------------|---------------------------------|
+| `${KERNEL_FULL_VERSION}` | Kernel version as reported by the kubelet         | `4.18.0-348.23.1.el8_5.x86_64`  |
+| `${KERNEL_XYZ}`          | Kernel version                                    | `4.18.0`                        |
+| `${KERNEL_X}`            | Kernel major version                              | `4`                             |
+| `${KERNEL_Y}`            | Kernel minor version                              | `18`                            |
+| `${KERNEL_Z}`            | Kernel patch version                              | `0`                             |
+| `${CONTAINER_IMAGE}`     | The container image determined set in the mapping | `registry.com/vendor/driver:v1` |
+
+#### RHEL specific variables
+
+| Variable                 | Description                            | Example          |
+|--------------------------|:---------------------------------------|------------------|
+| `${KERNEL_RHEL_VERSION}` | RHEL version this kernel was built for | `el8_5`          |
+| `${KERNEL_RHEL_RELEASE}` | Kernel release                         | `348.23.1.el8_5` |
+| `${KERNEL_RHEL_ARCH}`    | Kernel architecture                    | `x86_64`         |
+
+#### Debian specific variables
+
+Example version: `5.10.0-13-amd64`
+
+| Variable                   | Description    | Example |
+|----------------------------|----------------|---------|
+| `${KERNEL_DEBIAN_RELEASE}` | Kernel release | `104`   |
+| `${KERNEL_DEBIAN_FLAVOR}`  | Kernel flavor  | `amd64` |
+
+#### Ubuntu specific variables
+
+Example version: `5.4.0-104-generic`
+
+| Variable                   | Description    | Example                 |
+|----------------------------|----------------|-------------------------|
+| `${KERNEL_UBUNTU_RELEASE}` | Kernel release | `104`                   |
+| `${KERNEL_UBUNTU_FLAVOR}`  | Kernel flavor  | `generic`, `aws`, `gke` |
+
+**Proposal**: to parse the kernel version as reported by the kubelet and make it available in select fields:
+- all image references
+- as default build arguments in the Dockerfiles
 
 ## Updated CRD
 
@@ -286,8 +346,6 @@ spec:
             filesToSign:
               - /path/to/module0.ko
               - /path/to/module1.ko
-
-        containerImage: quay.io/vendor/module-sample:gke
 
     serviceAccountName: some-sa # optional
     volumes: [] # a list of additional volumes
