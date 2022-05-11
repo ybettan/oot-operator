@@ -82,7 +82,7 @@ Tools like [umoci](https://umo.ci/) might help us modify images as desired.
 Pre-flight checks consist in adding a dedicated CR specifying a future kernel `K` to the cluster.
 The traditional reconciliation loop should run just like if a node running `K` was in the cluster.
 
-**Proposal**:
+Assumptions:
 - if in-cluster builds are configured for `K` and the resulting image does not exist, the operator should build the
   image;
 - if module signing is configured and the resulting image does not exist, the operator should produce an image and push
@@ -90,7 +90,7 @@ The traditional reconciliation loop should run just like if a node running `K` w
 - the operator should not create DaemonSets.
 
 **Proposal**:
-- the `Preflight` CRD should contain a kernel version and a selector;
+- the `Preflight` CRD should contain a kernel version and a set of labels;
 - the operator should process the `Preflight` like it would process a `Node`, stopping short of creating any
   `DaemonSet`.
 
