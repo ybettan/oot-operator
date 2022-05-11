@@ -56,8 +56,30 @@ partition "Sync DaemonSets" {
       endif
     }
 
-    :Generate a DaemonSet spec for this mapping;
-    :Call ""CreateOrPatch()"" for this DaemonSet;
+    partition "Signing kmods" {
+      if (is kmod signing configured for this mapping?) then (no)
+      (yes) elseif (does the signed image already exist?) then (no)
+        if (are we already signing the kmods?) then (no)
+          :Create the Job that signs kmods;
+        else (yes)
+        endif
+
+        :Requeue a reconciliation
+        for this ""Module"";
+      endif
+    }
+
+    :""CreateOrPatch()"" a ServiceAccount for the DriverContainer;
+    :Bind the ServiceAccount to the appropriate PSP / SCC;
+    :""CreateOrPatch()"" the DriverContainer DaemonSet;
+
+    if (is device plugin enabled?) then (yes)
+      :""CreateOrPatch()"" a ServiceAccount for the device plugin;
+      :Bind the ServiceAccount to the appropriate PSP / SCC;
+      :""CreateOrPatch()"" the device plugin DaemonSet;
+    else (no)
+    endif
+
   endwhile (done)
 }
 
@@ -69,6 +91,8 @@ partition "Garbage collect obsolete DaemonSets" {
 
   while (there are unprocessed existing ""DaemonSets"") is (next ""DaemonSet"");
     if (is this kernel in ""mappings""?) then (no)
+      :Unbind the ServiceAccount from its PSP / SCC;
+      :Delete the ServiceAccount;
       :Delete the DaemonSet;
     else (yes)
     endif

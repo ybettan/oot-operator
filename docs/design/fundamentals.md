@@ -372,3 +372,7 @@ status:
     numberReady: 1
     numberAvailable: 1
 ```
+
+## Reconciliation loop
+
+![Reconciliation loop](reconciliation-module.png)
