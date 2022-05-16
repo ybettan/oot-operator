@@ -91,8 +91,13 @@ Assumptions:
 
 **Proposal**:
 - the `Preflight` CRD should contain a kernel version and a set of labels;
-- the operator should process the `Preflight` like it would process a `Node`, stopping short of creating any
-  `DaemonSet`.
+
+There is no consensus on whether a `Preflight` object should push images.
+Some team members would prefer a distinct CRD, while others advocate for adding a boolean to `Preflight`.
+
+**Action items**:
+- [ ] Call for a meeting with an architecture lead to decide on the strategy for image builds and pushes in pre-flight
+  mode.
 
 ### Hub & Spoke setups
 Assumptions:
@@ -103,12 +108,11 @@ Assumptions:
 **Proposal**:
 - run the operator in all spokes;
 - deploy the `Module` from the Hub;
-- leverage the Pre-flight feature to pre-build and pre-sign images on the Hub.
+- leverage the Pre-flight feature to pre-build and pre-sign images on the Hub;
+- add a controller that replicates the Hub's `Module` into an ACM `Policy`, removing all build settings;
+- add a build or runtime option to disable features on Spokes and keep the footprint as small as possible.
 
-This proposal is entirely decoupled from the OCM implementation and thus not downstream-specific.  
-It requires that the operator has a very light footprint.
-If the reconciliation loop grows in complexity, we might want to introduce a switch that reduces the number of features
-running in Spokes.
+This proposal is entirely decoupled from the OCM implementation and thus not downstream-specific.
 
 ### Logging and troubleshooting
 Assumptions:
@@ -128,6 +132,8 @@ Per [SIG Instrumentation](https://github.com/kubernetes/community/blob/master/co
 - Internal code receives and forwards loggers via `context.Context`;
 - 🔴 [must-gather](https://docs.openshift.com/container-platform/4.10/support/gathering-cluster-data.html) is
   implemented;
+  - no code to be added to SRO; we should instead provide a
+    [must-gather image](https://docs.google.com/document/d/18DLxJeq1cQ6oBcNXTkGgUbBiZt5BTamFzORnm6hRrm4/edit?skip_itp2_check=true&pli=1).
 - We study the use of [`Events`](https://www.cncf.io/blog/2020/12/10/the-top-kubernetes-apis-for-cloud-native-observability-part-1-the-kubernetes-metrics-service-container-apis-3/)
   to expose troubleshooting data to the user.
 
