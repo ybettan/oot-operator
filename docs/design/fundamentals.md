@@ -52,7 +52,6 @@ driverContainer:
 
   sign:
     unsignedImage:
-      pullSecretRef: # reference to a secret containing a pull secret for registry.com (optional)
       name: registry.com/vendor/driver:v1-unsigned
     signedImage:
       name: registry.com/vendor/driver:v1-signed
@@ -280,16 +279,19 @@ kind: Module
 metadata:
   name: module-sample
 spec:
-  devicePlugin: # is a Container spec
+  devicePlugin: # resembles a PodSpec
     container:
       # This container will be privileged and will mount
       # /var/lib/kubelet/device-plugins automatically.
       image: some-image
       volumeMounts: [] # additional volume mounts (optional)
 
+    imagePullSecrets:
+      - name: pull-secret-0
+
     serviceAccountName: some-sa # optional
     volumes: [] # a list of additional volumes
-  driverContainer: # is a Container spec
+  driverContainer: # resembles a PodSpec
     # This container will not be privileged by default.
     # It will mount /lib/modules and /usr/lib/modules automatically.
     container:
@@ -306,7 +308,6 @@ spec:
           value: SOME_AWS_VALUE
         pull:
           insecure: false
-          secretRef: # reference to a pull secret
         push:
           insecure: false
           name: '${CONTAINER_IMAGE}'
@@ -342,16 +343,18 @@ spec:
               name: ghcr.io/vendor/driver:v1.2.3-${KERNEL_VERSION}-unsigned
           sign: # GKE COS mandates kernel module signing
             unsignedImage:
-              pullSecretRef: # reference to a secret containing a pull secret for registry.com (optional)
               name: ghcr.io/vendor/driver:v1.2.3-${KERNEL_VERSION}-unsigned
             signedImage:
               name: ${CONTAINER_IMAGE}
-              pushSecretRef: # reference to a secret containing a push secret for registry.com (optional)
             keySecret: # reference to a secret containing the private key
             certSecret: # reference to a secret containing the public key
             filesToSign:
               - /path/to/module0.ko
               - /path/to/module1.ko
+
+    imageRepoSecrets: # used as imagePullSecrets in the DaemonSet and to pull / push for the build and sign features
+      - name: pull-secret-0
+      - name: pull-secret-1
 
     serviceAccountName: some-sa # optional
     volumes: [] # a list of additional volumes
