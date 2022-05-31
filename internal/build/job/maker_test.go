@@ -182,10 +182,27 @@ var _ = Describe("Maker", func() {
 		)
 	})
 
-	Describe("MakeSecretVolumes", func() {
+	Describe("makeBuildSecretVolumes", func() {
+
+		var (
+			ctrl *gomock.Controller
+			mh   *build.MockHelper
+			m    *maker
+		)
+
+		BeforeEach(func() {
+			ctrl = gomock.NewController(GinkgoT())
+			mh = build.NewMockHelper(ctrl)
+			m = NewMaker(mh, scheme).(*maker)
+		})
+
+		AfterEach(func() {
+			ctrl.Finish()
+		})
+
 		It("should return an empty list if there are no secrets", func() {
 			Expect(
-				MakeSecretVolumes(nil),
+				m.makeBuildSecretVolumes(nil),
 			).To(
 				BeEmpty(),
 			)
@@ -198,7 +215,7 @@ var _ = Describe("Maker", func() {
 			}
 
 			Expect(
-				MakeSecretVolumes(secretRefs),
+				m.makeBuildSecretVolumes(secretRefs),
 			).To(
 				Equal([]v1.Volume{
 					{
@@ -218,10 +235,27 @@ var _ = Describe("Maker", func() {
 		})
 	})
 
-	Describe("MakeSecretVolumeMounts", func() {
+	Describe("makeBuildSecretVolumeMounts", func() {
+
+		var (
+			ctrl *gomock.Controller
+			mh   *build.MockHelper
+			m    *maker
+		)
+
+		BeforeEach(func() {
+			ctrl = gomock.NewController(GinkgoT())
+			mh = build.NewMockHelper(ctrl)
+			m = NewMaker(mh, scheme).(*maker)
+		})
+
+		AfterEach(func() {
+			ctrl.Finish()
+		})
+
 		It("should return an empty list if there are no secrets", func() {
 			Expect(
-				MakeSecretVolumeMounts(nil),
+				m.makeBuildSecretVolumeMounts(nil),
 			).To(
 				BeEmpty(),
 			)
@@ -234,7 +268,7 @@ var _ = Describe("Maker", func() {
 			}
 
 			Expect(
-				MakeSecretVolumeMounts(secretRefs),
+				m.makeBuildSecretVolumeMounts(secretRefs),
 			).To(
 				Equal([]v1.VolumeMount{
 					{

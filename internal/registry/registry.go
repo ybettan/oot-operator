@@ -12,11 +12,16 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/authn/kubernetes"
 	"github.com/google/go-containerregistry/pkg/crane"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	ootov1alpha1 "github.com/qbarrand/oot-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -38,20 +43,24 @@ type RepoPullConfig struct {
 //go:generate mockgen -source=registry.go -package=registry -destination=mock_registry_api.go
 
 type Registry interface {
-	ImageExists(ctx context.Context, image string, po ootov1alpha1.PullOptions) (bool, error)
+	ImageExists(ctx context.Context, image string, po ootov1alpha1.PullOptions, ps corev1.LocalObjectReference, psNamespace string) (bool, error)
 	ExtractToolkitRelease(v1.Layer) (*DriverToolkitEntry, error)
 	GetLayersDigests(ctx context.Context, image string) ([]string, *RepoPullConfig, error)
 	GetLayerByDigest(digest string, pullConfig *RepoPullConfig) (v1.Layer, error)
 }
 
-type registry struct{}
-
-func NewRegistry() Registry {
-	return &registry{}
+type registry struct {
+	client client.Client
 }
 
-func (r *registry) ImageExists(ctx context.Context, image string, po ootov1alpha1.PullOptions) (bool, error) {
-	pullConfig, err := r.getPullOptions(ctx, image, &po)
+func NewRegistry(client client.Client) Registry {
+	return &registry{
+		client: client,
+	}
+}
+
+func (r *registry) ImageExists(ctx context.Context, image string, po ootov1alpha1.PullOptions, ps corev1.LocalObjectReference, psNamespace string) (bool, error) {
+	pullConfig, err := r.getPullOptions(ctx, image, &po, &ps, psNamespace)
 	if err != nil {
 		return false, fmt.Errorf("failed to get pull options for image %s: %w", image, err)
 	}
@@ -67,7 +76,7 @@ func (r *registry) ImageExists(ctx context.Context, image string, po ootov1alpha
 }
 
 func (r *registry) GetLayersDigests(ctx context.Context, image string) ([]string, *RepoPullConfig, error) {
-	pullConfig, err := r.getPullOptions(ctx, image, nil)
+	pullConfig, err := r.getPullOptions(ctx, image, nil, nil, "")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get pull options for image %s: %w", image, err)
 	}
@@ -113,7 +122,26 @@ func (r *registry) ExtractToolkitRelease(layer v1.Layer) (*DriverToolkitEntry, e
 	return dtk, nil
 }
 
-func (r *registry) getPullOptions(ctx context.Context, image string, po *ootov1alpha1.PullOptions) (*RepoPullConfig, error) {
+func (r *registry) getAuthForRegistry(ctx context.Context, registry string, ps *corev1.LocalObjectReference, psNamespace string) (authn.Keychain, error) {
+
+	secret := corev1.Secret{}
+	secretNamespacedName := types.NamespacedName{
+		Name:      ps.Name,
+		Namespace: psNamespace,
+	}
+	if err := r.client.Get(ctx, secretNamespacedName, &secret); err != nil {
+		return nil, fmt.Errorf("cannot find secret %v: %w", secretNamespacedName, err)
+	}
+
+	keychain, err := kubernetes.NewFromPullSecrets(ctx, []corev1.Secret{secret})
+	if err != nil {
+		return nil, fmt.Errorf("could not create a keycahin from secret %v: %w", secret, err)
+	}
+
+	return keychain, nil
+}
+
+func (r *registry) getPullOptions(ctx context.Context, image string, po *ootov1alpha1.PullOptions, ps *corev1.LocalObjectReference, psNamespace string) (*RepoPullConfig, error) {
 	var repo string
 	if hash := strings.Split(image, "@"); len(hash) > 1 {
 		repo = hash[0]
@@ -143,6 +171,18 @@ func (r *registry) getPullOptions(ctx context.Context, image string, po *ootov1a
 				crane.WithTransport(rt),
 			)
 		}
+	}
+
+	if ps != nil {
+		registry := strings.Split(image, "/")[0]
+		keyChain, err := r.getAuthForRegistry(ctx, registry, ps, psNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("cannot find specified imagePullSecret %v: %w", ps, err)
+		}
+		options = append(
+			options,
+			crane.WithAuthFromKeychain(keyChain),
+		)
 	}
 
 	return &RepoPullConfig{repo: repo, authOptions: options}, nil
