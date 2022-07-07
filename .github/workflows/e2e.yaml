@@ -376,6 +376,9 @@ jobs:
 
           kubectl apply -f module-ooto-ci.yaml
 
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
+
       - name: Wait for the job to be created
         run: |
           until kubectl get job -l oot.node.kubernetes.io/module.name | grep ooto; do
