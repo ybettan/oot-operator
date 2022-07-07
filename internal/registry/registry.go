@@ -157,7 +157,7 @@ func (r *registry) getPullOptions(ctx context.Context, image string, po *ootov1a
 		crane.WithContext(ctx),
 	}
 
-	if po != nil {
+	if *po != (ootov1alpha1.PullOptions{}) {
 		if po.Insecure {
 			options = append(options, crane.Insecure)
 		}
@@ -173,7 +173,7 @@ func (r *registry) getPullOptions(ctx context.Context, image string, po *ootov1a
 		}
 	}
 
-	if ps != nil {
+	if *ps != (corev1.LocalObjectReference{}) {
 		registry := strings.Split(image, "/")[0]
 		keyChain, err := r.getAuthForRegistry(ctx, registry, ps, psNamespace)
 		if err != nil {
